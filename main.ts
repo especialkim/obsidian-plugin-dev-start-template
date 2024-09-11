@@ -1,85 +1,152 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+import { App, Editor, MarkdownView, Notice, Plugin, TFile, View } from 'obsidian';
+import { SampleSettingTab, MyPluginSettings, DEFAULT_SETTINGS } from './src/settings';
+import { StatusBar } from './src/statusBar';
+import { Ribbon } from './src/ribbon';
+import { SampleModal } from './src/sampleModal';
+import { SelectionPopup } from './src/selectionPopup';
+import { CustomRenderer } from './src/renderer';
+import { ContextMenu } from './src/contextMenu';
+import { AutoComplete } from './src/autoComplete';
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
+	statusBar: StatusBar;
+	ribbon: Ribbon;
+	private selectionPopup: SelectionPopup;
+	private renderer: CustomRenderer;
+	private contextMenu: ContextMenu;
+	private autoComplete: AutoComplete;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.statusBar = new StatusBar(this);
+		this.ribbon = new Ribbon(this);
+
+		this.addCommands();
+		this.addSettingTab(new SampleSettingTab(this.app, this));
+
+		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
+			console.log('클릭', evt);
 		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+		this.renderer = new CustomRenderer();
 
-		// This adds a simple command that can be triggered anywhere
+		// 모든 프로세서를 등록하여 지원되는 언어에 대한 마크다운 코드 블록 프로세서를 설정합니다.
+		// 각 프로세서는 CustomRenderer의 특정 처리기를 사용하여 소스 코드를 처리합니다.
+		for (const lang of this.renderer.getSupportedLanguages()) {
+			this.registerMarkdownCodeBlockProcessor(lang, (source, el, ctx) => {
+				const processor = this.renderer.getProcessor(lang);
+				if (processor) {
+					processor(source, el, ctx);
+				}
+			});
+		}
+
+		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+
+		this.selectionPopup = new SelectionPopup(this);
+		
+		this.contextMenu = new ContextMenu(this);
+		this.autoComplete = new AutoComplete(this);
+
+	}
+
+	onunload() {
+		// 필���한 정리 작업 수행
+	}
+
+	private addCommands() {
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
+			id: 'show-current-view-type',
+			name: '현재 뷰 타입 보기',
 			callback: () => {
-				new SampleModal(this.app).open();
+				const activeView = this.app.workspace.getActiveViewOfType(View);
+				if (activeView) {
+					const viewType = activeView.getViewType();
+					new Notice(`현재 뷰 타입: ${viewType}`);
+				} else {
+					new Notice('활성화된 뷰가 없습니다.');
+				}
 			}
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
+
+		// 이것은 현재 편집기 인스턴스에서 작업을 수행할 수 있는 편집기 명령을 추가합니다
 		this.addCommand({
 			id: 'sample-editor-command',
-			name: 'Sample editor command',
+			name: '샘플 편집기 명령',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
+				editor.replaceSelection('샘플 편집기 명령');
 			}
 		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
+
+		// 이것은 앱의 현재 상태가 명령 실행을 허용하는지 확인할 수 있는 복잡한 명령을 추가합니다
 		this.addCommand({
 			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
+			name: '샘플 모달 열기 (복잡)',
 			checkCallback: (checking: boolean) => {
-				// Conditions to check
+				// 확할 조건
 				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
+					// checking이 true이면, 단순히 명령을 실행할 수 있는지 "확인"하는 것입니다.
+					// checking이 false이면, 실제로 작업을 수행하려는 것입니다.
 					if (!checking) {
 						new SampleModal(this.app).open();
 					}
-
-					// This command will only show up in Command Palette when the check function returns true
+					// 이 명령은 확인 함수가 true를 반환할 때만 명령 팔레트에 표시됩니다
 					return true;
 				}
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
+		// 사용자 리스트를 출력하는 새로운 명령어 추가
+		this.addCommand({
+			id: 'show-user-list',
+			name: '사용자 리스트 보기',
+			callback: () => this.showUserList()
 		});
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		// 선택된 JSON 파일 정보를 보여주는 명령어
+		this.addCommand({
+			id: 'show-selected-json-info',
+			name: '선택된 JSON 파일 정보 보기',
+			callback: () => this.showSelectedJsonInfo()
+		});
 	}
 
-	onunload() {
+	// 사용자 리스트를 Notice로 출력하는 새로운 메서드
+	private showUserList() {
+		const userList = this.settings.userList;
+		if (userList.length === 0) {
+			new Notice('사용자 리스트가 비어있습니다.');
+		} else {
+			const userListString = userList.join(', ');
+			new Notice(`사용자 리스트: ${userListString}`, 5000); // 5초 동안 표시
+		}
+	}
 
+	// 선택된 JSON 파일의 정보를 보여주는 메서드
+	private showSelectedJsonInfo() {
+		const filePath = this.settings.selectedJsonFile;
+		if (!filePath) {
+			new Notice('선택된 JSON 파일이 없습니다.');
+			return;
+		}
+
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (file instanceof TFile) {
+			const fileName = file.name;
+			new Notice(`선택된 JSON 파일:\n파일명: ${fileName}\n경로: ${filePath}`, 5000);
+		} else {
+			new Notice('선택된 파일을 찾을 수 없습니다.');
+		}
+	}
+
+	private transformContent(source: string): string {
+		return source.replace(/a/g, '1')
+					 .replace(/b/g, '2')
+					 .replace(/c/g, '3');
 	}
 
 	async loadSettings() {
@@ -88,47 +155,5 @@ export default class MyPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
 	}
 }
