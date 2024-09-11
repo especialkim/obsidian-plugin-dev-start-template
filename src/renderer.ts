@@ -1,10 +1,13 @@
 import { MarkdownPostProcessorContext } from 'obsidian';
+import { Plugin } from 'obsidian';
 
 export class CustomRenderer {
     private processors: Map<string, (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => void>;
+    private registeredProcessors: string[];
 
     constructor() {
         this.processors = new Map();
+        this.registeredProcessors = [];
         this.initializeProcessors();
     }
 
@@ -24,10 +27,16 @@ export class CustomRenderer {
     }
 
     private calculatorProcessor(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
-        const result = eval(source);
-        const container = el.createDiv();
-        container.createEl("div", { text: `계산식: ${source}` });
-        container.createEl("div", { text: `결과: ${result}` });
+        try {
+            const result = Function('"use strict";return (' + source + ')')();
+            const container = el.createDiv();
+            container.createEl("div", { text: `계산식: ${source}` });
+            container.createEl("div", { text: `결과: ${result}` });
+        } catch (error) {
+            const container = el.createDiv();
+            container.createEl("div", { text: `계산식: ${source}` });
+            container.createEl("div", { text: `오류: 유효하지 않은 수식입니다.`, cls: 'error' });
+        }
     }
 
     private transformContent(source: string): string {
@@ -38,5 +47,22 @@ export class CustomRenderer {
 
     getSupportedLanguages(): string[] {
         return Array.from(this.processors.keys());
+    }
+
+    public registerProcessors(plugin: Plugin) {
+        for (const lang of this.getSupportedLanguages()) {
+            plugin.registerMarkdownCodeBlockProcessor(lang, (source, el, ctx) => {
+                const processor = this.getProcessor(lang);
+                if (processor) {
+                    processor(source, el, ctx);
+                }
+            });
+            this.registeredProcessors.push(lang);
+        }
+    }
+
+    public unregisterProcessors(plugin: Plugin) {
+        // Obsidian handles cleanup automatically
+        this.registeredProcessors = [];
     }
 }
